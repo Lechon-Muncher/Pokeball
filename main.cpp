@@ -16,15 +16,19 @@ bool buttonState     = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long playStartTime = 0;
 const unsigned long DEBOUNCE_DELAY = 50;
-const unsigned long SOUND_DURATION = 2000;
+const unsigned long SOUND_DURATION = 1000;
 
 const int FADE_DURATION = 500;
 int ledBrightness = 0;
 
 enum LedState { LED_OFF, LED_FADING_IN, LED_ON, LED_FADING_OUT };
+enum ServoState {SERVO_IDLE, SERVO_RIGHT, SERVO_LEFT};
 LedState ledState = LED_OFF;
+ServoState servoState = SERVO_IDLE;
 
 unsigned long fadeStartTime = 0; //tracks current fade start time
+unsigned long servoMoveTime = 0;
+const unsigned long SERVO_MOVE_DURATION = 600;
 
 void handleLED();
 void handleButton();
@@ -63,6 +67,10 @@ void loop(){
         Serial.println(F("Track finished\n"));
     }
     
+    if(servoState == SERVO_RIGHT && millis() - servoMoveTime >= SERVO_MOVE_DURATION){
+        myServo.write(0);
+        servoState = SERVO_IDLE;
+    }
 }
 
 void handleLED(){
@@ -110,8 +118,8 @@ void handleButton(){
                 ledState = LED_FADING_IN; //starts fding the led in
                 fadeStartTime = millis();
                 myServo.write(180);
-                delay(600);
-                myServo.write(0);
+                servoMoveTime = millis();
+                servoState = SERVO_RIGHT;
             }
         }
     }
