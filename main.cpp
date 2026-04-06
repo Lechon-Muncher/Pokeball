@@ -1,23 +1,22 @@
-#include <Arduino.h>            // Required for PlatformIO to access Arduino functions
-#include <SoftwareSerial.h>     // Library to create a serial port on any digital pins
-#include <DFRobotDFPlayerMini.h> // Library to control the DFPlayer Mini module
-#include <Servo.h>              // Library to control servo motors
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+#include <Servo.h>
 
-SoftwareSerial mySoftwareSerial(10, 11); // Create software serial on pin 10 (RX) and 11 (TX)
-DFRobotDFPlayerMini myDFPlayer;          // Create DFPlayer object to send commands to
-Servo myServo;                           // Create servo object to control the servo
+SoftwareSerial mySoftwareSerial(10, 11);
+DFRobotDFPlayerMini myDFPlayer;
+Servo myServo;
 
-#define LED_PIN    9  // LED is connected to pin 9
-#define BUTTON_PIN 2  // Button is connected to pin 2
-#define SERVO_PIN  6  // Servo is connected to pin 6
+#define LED_PIN    9
+#define BUTTON_PIN 2
+#define SERVO_PIN  6
 
 bool lastButtonState = HIGH;
 bool buttonState     = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long playStartTime = 0;
 const unsigned long DEBOUNCE_DELAY = 50;
-const unsigned long SOUND_DURATION = 2000;
-const unsigned long LED_ON_DURATION = 800;
+const unsigned long LED_ON_DURATION = 1500;
 
 const unsigned long CATCH_SOUND_DURATION = 1500;
 bool playingCatchSound = false;
@@ -27,13 +26,11 @@ const int FADE_DURATION = 500;
 int ledBrightness = 0;
 
 enum LedState { LED_OFF, LED_FADING_IN, LED_ON, LED_FADING_OUT };
-enum ServoState {SERVO_IDLE, SERVO_RIGHT, SERVO_LEFT};
+enum ServoState { SERVO_IDLE, SERVO_WIGGLING };
 LedState ledState = LED_OFF;
 ServoState servoState = SERVO_IDLE;
 
-unsigned long fadeStartTime = 0; //tracks current fade start time
-unsigned long servoMoveTime = 0;
-const unsigned long SERVO_MOVE_DURATION = 500;
+unsigned long fadeStartTime = 0;
 
 bool caught = false;
 
@@ -41,143 +38,153 @@ unsigned long wiggleWaitStart = 0;
 const unsigned long WIGGLE_WAIT = 500;
 bool waitingBetweenWiggles = false;
 int wigglesRemaining = 0;
-bool wiggleInProgress = false;
+
+// Wiggle internals
+unsigned long wiggleStepTime = 0;        // Tracks when the last wiggle step happened
+const unsigned long WIGGLE_STEP = 100;   // How long each wiggle position is held in ms
+int wiggleStepsRemaining = 0;            // How many individual steps are left in this wiggle
+bool wiggleGoingRight = true;            // Tracks which direction servo is currently moving
 
 void handleLED();
 void handleButton();
-void wiggle();
+void startWiggle();
+void handleWiggle();
 
-void setup(){
+void setup() {
     randomSeed(analogRead(0));
     mySoftwareSerial.begin(9600);
     Serial.begin(115200);
     delay(2000);
 
-    pinMode(LED_PIN, OUTPUT); // set led pin as output, controls brightness
-    pinMode(BUTTON_PIN, INPUT_PULLUP); // sets button pin as input, reads HIGH when not pressed
-    analogWrite(LED_PIN, 0); // sets led to start at zero brightness
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    analogWrite(LED_PIN, 0);
 
-    myServo.attach(SERVO_PIN);  // attaches servo obj to pin 6
-    myServo.write(0); //moves servo to 0 on startup
+    myServo.attach(SERVO_PIN);
+    myServo.write(90); // start at center position
 
     Serial.println(F("Initializing DFPlayer..."));
-    if (!myDFPlayer.begin(mySoftwareSerial, false, false)) { // checks DFPLayer init, if no ack and no reset
-        Serial.println(F("Not initialized\n"));
-        while(true); // freeze program if DFPLayer fails
+    if (!myDFPlayer.begin(mySoftwareSerial, false, false)) {
+        Serial.println(F("Not initialized"));
+        while (true);
     }
 
     Serial.println(F("DFPlayer works"));
-    myDFPlayer.volume(20); 
-
+    myDFPlayer.volume(20);
 }
 
-void loop(){
-    handleButton(); // checks if button is pressed every loop
-    handleLED(); // update brightness
-    
-    if(ledState == LED_ON && (millis() - playStartTime >= LED_ON_DURATION)){
+void loop() {
+    handleButton();
+    handleLED();
+    handleWiggle(); // handles the wiggle steps over time
+
+    // When LED has been on long enough, start fading out
+    if (ledState == LED_ON && (millis() - playStartTime >= LED_ON_DURATION)) {
         ledState = LED_FADING_OUT;
-        fadeStartTime = millis(); // records time fade ou startss
-        Serial.println(F("Track finished\n"));
+        fadeStartTime = millis();
+        Serial.println(F("Track finished"));
     }
-    
-    if(servoState == SERVO_RIGHT && millis() - servoMoveTime >= SERVO_MOVE_DURATION){
-        myServo.write(0);
-        servoState = SERVO_IDLE;
-        
-        
-    }
-    if(wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF){
-        if(!waitingBetweenWiggles){
+
+    // Once current wiggle is fully done (servo idle, LED off), start next wiggle if any remaining
+    if (wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF) {
+        if (!waitingBetweenWiggles) {
             wiggleWaitStart = millis();
             waitingBetweenWiggles = true;
-        } else if(millis() - wiggleWaitStart >= WIGGLE_WAIT){
-            wiggle();
+        } else if (millis() - wiggleWaitStart >= WIGGLE_WAIT) {
+            startWiggle();
             wigglesRemaining--;
             waitingBetweenWiggles = false;
         }
     }
 
-    if(playingCatchSound && millis() -catchSoundStart >= CATCH_SOUND_DURATION){
+    // Track catch sound duration
+    if (playingCatchSound && millis() - catchSoundStart >= CATCH_SOUND_DURATION) {
         playingCatchSound = false;
     }
 
-    if(caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound){
+    // Play catch sound once all wiggles are done and everything has settled
+    if (caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound) {
         myDFPlayer.play(2);
         catchSoundStart = millis();
         playingCatchSound = true;
         caught = false;
     }
-
 }
 
-void handleLED(){
-    if(ledState == LED_FADING_IN){
-        float progress = (float)(millis() - fadeStartTime) / FADE_DURATION; // calculates fade progress
-        
-        if(progress >= 1.0){
-            progress = 1.0; // caps progress, so brightness does not exceed 255
-            ledState = LED_ON; // sets led to on when fade progress is finished
-        }
-
+void handleLED() {
+    if (ledState == LED_FADING_IN) {
+        float progress = (float)(millis() - fadeStartTime) / FADE_DURATION;
+        if (progress >= 1.0) { progress = 1.0; ledState = LED_ON; }
         ledBrightness = (int)(progress * 255);
         analogWrite(LED_PIN, ledBrightness);
-
     }
 
-    if(ledState == LED_FADING_OUT){
+    if (ledState == LED_FADING_OUT) {
         float progress = (float)(millis() - fadeStartTime) / FADE_DURATION;
-        if(progress >= 1.0){
-            progress = 1.0;
-            ledState = LED_OFF;
-        }
+        if (progress >= 1.0) { progress = 1.0; ledState = LED_OFF; }
         ledBrightness = (int)((1.0 - progress) * 255);
         analogWrite(LED_PIN, ledBrightness);
     }
-
 }
 
-void handleButton(){
-    bool reading = digitalRead(BUTTON_PIN); // reads current button state
+void handleButton() {
+    bool reading = digitalRead(BUTTON_PIN);
 
-    if(reading != lastButtonState){
-        lastDebounceTime = millis(); // records time of button state change for deb
+    if (reading != lastButtonState) {
+        lastDebounceTime = millis();
     }
 
-    if((millis() - lastDebounceTime) > DEBOUNCE_DELAY){
-        if(reading != buttonState){
-            buttonState = reading; // updates button state if changed and debounce time has passed, debounce handles button bounce from a single press
-            
-            if(buttonState == LOW && ledState == LED_OFF){ // checks if button is pressed and led is not already on to prevent multiple triggers from a single press
-                //Serial.println(F("Button pressed - playing track 1\n"));
-                    int catch_attempt = rand() % 100 + 1;
-                    
-                    if(catch_attempt <= 10) {
-                        wigglesRemaining = 4;
-                        caught = true;
-                    } else if(catch_attempt <= 20){
-                        wigglesRemaining = 3;
-                    } else if(catch_attempt <= 40){
-                        wigglesRemaining = 2;
-                    } else if(catch_attempt <= 80){
-                        wigglesRemaining = 1;
-                    } else {
-                        wigglesRemaining = 0;
-                    }
+    if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+        if (reading != buttonState) {
+            buttonState = reading;
 
+            if (buttonState == LOW && ledState == LED_OFF && servoState == SERVO_IDLE && wigglesRemaining == 0) {
+                int catch_attempt = rand() % 100 + 1;
+
+                if (catch_attempt <= 10) {
+                    wigglesRemaining = 4;
+                    caught = true;
+                } else if (catch_attempt <= 20) {
+                    wigglesRemaining = 3;
+                } else if (catch_attempt <= 40) {
+                    wigglesRemaining = 2;
+                } else if (catch_attempt <= 80) {
+                    wigglesRemaining = 1;
+                } else {
+                    wigglesRemaining = 0;
+                }
             }
         }
     }
 
-    lastButtonState = reading; // updates last button state for next loop
+    lastButtonState = reading;
 }
 
-void wiggle(){
-    myDFPlayer.play(1);
-    playStartTime = millis(); //records time sounds start for timing LED
-    ledState = LED_FADING_IN; //starts fding the led in
-    fadeStartTime = millis();
-    myServo.write(180);
-    servoMoveTime = millis();
-    servoState = SERVO_RIGHT;
+void startWiggle() {
+    myDFPlayer.play(1);                // play wiggle sound
+    playStartTime = millis();          // record sound start time
+    ledState = LED_FADING_IN;          // start fading LED in
+    fadeStartTime = millis();          // record fade start time
+    servoState = SERVO_WIGGLING;       // mark servo as wiggling
+    wiggleStepsRemaining = 6;          // 6 steps = 3 full back and forth swings (increase for more wiggles)
+    wiggleGoingRight = true;           // start by going right to 120
+    wiggleStepTime = millis();         // record when first step starts
+    myServo.write(120);                // move to first position immediately
+}
+
+void handleWiggle() {
+    if (servoState != SERVO_WIGGLING) return; 
+
+    if (millis() - wiggleStepTime >= WIGGLE_STEP) { // ff enough time has passed for next step
+        wiggleStepTime = millis();                   // reset step timer
+
+        if (wiggleStepsRemaining > 0) {
+            wiggleGoingRight = !wiggleGoingRight;        // alternate direction
+            myServo.write(wiggleGoingRight ? 130 : 50);  // move to 120 or 60 depending on direction
+            wiggleStepsRemaining--;                      // count down steps
+        } else {
+            myServo.write(90);       // return to center when done
+            servoState = SERVO_IDLE; // mark servo as idle
+        }
+    }
 }
