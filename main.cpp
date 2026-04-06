@@ -38,7 +38,7 @@ const unsigned long SERVO_MOVE_DURATION = 500;
 bool caught = false;
 
 unsigned long wiggleWaitStart = 0;
-const unsigned long WIGGLE_WAIT =500;
+const unsigned long WIGGLE_WAIT = 500;
 bool waitingBetweenWiggles = false;
 int wigglesRemaining = 0;
 bool wiggleInProgress = false;
@@ -165,10 +165,6 @@ void handleButton(){
                         wigglesRemaining = 0;
                     }
 
-                    if(wigglesRemaining > 0){
-                        wiggle();
-                        wigglesRemaining--;
-                    }
             }
         }
     }
