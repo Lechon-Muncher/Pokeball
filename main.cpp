@@ -22,6 +22,11 @@ const unsigned long CATCH_SOUND_DURATION = 1500;
 bool playingCatchSound = false;
 unsigned long catchSoundStart = 0;
 
+const unsigned long ESCAPE_SOUND_DURATION = 5000;
+bool playingEscapeSound = false;
+unsigned long escapeSoundStart = 0;
+bool attemptMade = false;
+
 const int FADE_DURATION = 500;
 int ledBrightness = 0;
 
@@ -40,10 +45,10 @@ bool waitingBetweenWiggles = false;
 int wigglesRemaining = 0;
 
 // Wiggle internals
-unsigned long wiggleStepTime = 0;        // Tracks when the last wiggle step happened
-const unsigned long WIGGLE_STEP = 100;   // How long each wiggle position is held in ms
-int wiggleStepsRemaining = 0;            // How many individual steps are left in this wiggle
-bool wiggleGoingRight = true;            // Tracks which direction servo is currently moving
+unsigned long wiggleStepTime = 0;        // tracks when the last wiggle step happened
+const unsigned long WIGGLE_STEP = 100;   // how long each wiggle position is held in ms
+int wiggleStepsRemaining = 0;            // how many individual steps are left in this wiggle
+bool wiggleGoingRight = true;            // tracks which direction servo is currently moving
 
 void handleLED();
 void handleButton();
@@ -78,14 +83,12 @@ void loop() {
     handleLED();
     handleWiggle(); // handles the wiggle steps over time
 
-    // When LED has been on long enough, start fading out
     if (ledState == LED_ON && (millis() - playStartTime >= LED_ON_DURATION)) {
         ledState = LED_FADING_OUT;
         fadeStartTime = millis();
         Serial.println(F("Track finished"));
     }
 
-    // Once current wiggle is fully done (servo idle, LED off), start next wiggle if any remaining
     if (wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF) {
         if (!waitingBetweenWiggles) {
             wiggleWaitStart = millis();
@@ -97,17 +100,27 @@ void loop() {
         }
     }
 
-    // Track catch sound duration
     if (playingCatchSound && millis() - catchSoundStart >= CATCH_SOUND_DURATION) {
         playingCatchSound = false;
     }
 
-    // Play catch sound once all wiggles are done and everything has settled
     if (caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound) {
         myDFPlayer.play(2);
         catchSoundStart = millis();
         playingCatchSound = true;
         caught = false;
+        attemptMade = false;
+    }
+
+    if (playingEscapeSound && millis() - escapeSoundStart >= ESCAPE_SOUND_DURATION) {
+        playingEscapeSound = false;
+    }
+
+    if (attemptMade && !caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingEscapeSound){
+        myDFPlayer.play(3);
+        escapeSoundStart = millis();
+        playingEscapeSound = true;
+        attemptMade = false;
     }
 }
 
@@ -139,6 +152,7 @@ void handleButton() {
             buttonState = reading;
 
             if (buttonState == LOW && ledState == LED_OFF && servoState == SERVO_IDLE && wigglesRemaining == 0) {
+                attemptMade = true;
                 int catch_attempt = rand() % 100 + 1;
 
                 if (catch_attempt <= 10) {
