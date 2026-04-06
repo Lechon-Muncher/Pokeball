@@ -16,7 +16,8 @@ bool buttonState     = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long playStartTime = 0;
 const unsigned long DEBOUNCE_DELAY = 50;
-const unsigned long SOUND_DURATION = 1000;
+const unsigned long SOUND_DURATION = 2000;
+const unsigned long LED_ON_DURATION = 800;
 
 const unsigned long CATCH_SOUND_DURATION = 1500;
 bool playingCatchSound = false;
@@ -32,10 +33,13 @@ ServoState servoState = SERVO_IDLE;
 
 unsigned long fadeStartTime = 0; //tracks current fade start time
 unsigned long servoMoveTime = 0;
-const unsigned long SERVO_MOVE_DURATION = 600;
+const unsigned long SERVO_MOVE_DURATION = 500;
 
 bool caught = false;
 
+unsigned long wiggleWaitStart = 0;
+const unsigned long WIGGLE_WAIT =500;
+bool waitingBetweenWiggles = false;
 int wigglesRemaining = 0;
 bool wiggleInProgress = false;
 
@@ -71,7 +75,7 @@ void loop(){
     handleButton(); // checks if button is pressed every loop
     handleLED(); // update brightness
     
-    if(ledState == LED_ON && (millis() - playStartTime >= SOUND_DURATION)){
+    if(ledState == LED_ON && (millis() - playStartTime >= LED_ON_DURATION)){
         ledState = LED_FADING_OUT;
         fadeStartTime = millis(); // records time fade ou startss
         Serial.println(F("Track finished\n"));
@@ -84,8 +88,14 @@ void loop(){
         
     }
     if(wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF){
-        wiggle();
-        wigglesRemaining--;
+        if(!waitingBetweenWiggles){
+            wiggleWaitStart = millis();
+            waitingBetweenWiggles = true;
+        } else if(millis() - wiggleWaitStart >= WIGGLE_WAIT){
+            wiggle();
+            wigglesRemaining--;
+            waitingBetweenWiggles = false;
+        }
     }
 
     if(playingCatchSound && millis() -catchSoundStart >= CATCH_SOUND_DURATION){
@@ -98,6 +108,7 @@ void loop(){
         playingCatchSound = true;
         caught = false;
     }
+
 }
 
 void handleLED(){
