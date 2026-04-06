@@ -18,6 +18,10 @@ unsigned long playStartTime = 0;
 const unsigned long DEBOUNCE_DELAY = 50;
 const unsigned long SOUND_DURATION = 1000;
 
+const unsigned long CATCH_SOUND_DURATION = 1500;
+bool playingCatchSound = false;
+unsigned long catchSoundStart = 0;
+
 const int FADE_DURATION = 500;
 int ledBrightness = 0;
 
@@ -29,6 +33,8 @@ ServoState servoState = SERVO_IDLE;
 unsigned long fadeStartTime = 0; //tracks current fade start time
 unsigned long servoMoveTime = 0;
 const unsigned long SERVO_MOVE_DURATION = 600;
+
+bool caught = false;
 
 int wigglesRemaining = 0;
 bool wiggleInProgress = false;
@@ -81,6 +87,17 @@ void loop(){
         wiggle();
         wigglesRemaining--;
     }
+
+    if(playingCatchSound && millis() -catchSoundStart >= CATCH_SOUND_DURATION){
+        playingCatchSound = false;
+    }
+
+    if(caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound){
+        myDFPlayer.play(2);
+        catchSoundStart = millis();
+        playingCatchSound = true;
+        caught = false;
+    }
 }
 
 void handleLED(){
@@ -126,6 +143,7 @@ void handleButton(){
                     
                     if(catch_attempt <= 10) {
                         wigglesRemaining = 4;
+                        caught = true;
                     } else if(catch_attempt <= 20){
                         wigglesRemaining = 3;
                     } else if(catch_attempt <= 40){
