@@ -30,10 +30,15 @@ unsigned long fadeStartTime = 0; //tracks current fade start time
 unsigned long servoMoveTime = 0;
 const unsigned long SERVO_MOVE_DURATION = 600;
 
+int wigglesRemaining = 0;
+bool wiggleInProgress = false;
+
 void handleLED();
 void handleButton();
+void wiggle();
 
 void setup(){
+    randomSeed(analogRead(0));
     mySoftwareSerial.begin(9600);
     Serial.begin(115200);
     delay(2000);
@@ -59,17 +64,22 @@ void setup(){
 void loop(){
     handleButton(); // checks if button is pressed every loop
     handleLED(); // update brightness
-
+    
     if(ledState == LED_ON && (millis() - playStartTime >= SOUND_DURATION)){
         ledState = LED_FADING_OUT;
         fadeStartTime = millis(); // records time fade ou startss
-        myServo.write(0); // sets servo back to rest after everything
         Serial.println(F("Track finished\n"));
     }
     
     if(servoState == SERVO_RIGHT && millis() - servoMoveTime >= SERVO_MOVE_DURATION){
         myServo.write(0);
         servoState = SERVO_IDLE;
+        
+        
+    }
+    if(wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF){
+        wiggle();
+        wigglesRemaining--;
     }
 }
 
@@ -110,19 +120,39 @@ void handleButton(){
         if(reading != buttonState){
             buttonState = reading; // updates button state if changed and debounce time has passed, debounce handles button bounce from a single press
             
-            if(buttonState == LOW && ledState == LED_OFF){
-                Serial.println(F("Button pressed - playing track 1\n"));
+            if(buttonState == LOW && ledState == LED_OFF){ // checks if button is pressed and led is not already on to prevent multiple triggers from a single press
+                //Serial.println(F("Button pressed - playing track 1\n"));
+                    int catch_attempt = rand() % 100 + 1;
+                    
+                    if(catch_attempt <= 10) {
+                        wigglesRemaining = 4;
+                    } else if(catch_attempt <= 20){
+                        wigglesRemaining = 3;
+                    } else if(catch_attempt <= 40){
+                        wigglesRemaining = 2;
+                    } else if(catch_attempt <= 80){
+                        wigglesRemaining = 1;
+                    } else {
+                        wigglesRemaining = 0;
+                    }
 
-                myDFPlayer.play(1);
-                playStartTime = millis(); //records time sounds start for timing LED
-                ledState = LED_FADING_IN; //starts fding the led in
-                fadeStartTime = millis();
-                myServo.write(180);
-                servoMoveTime = millis();
-                servoState = SERVO_RIGHT;
+                    if(wigglesRemaining > 0){
+                        wiggle();
+                        wigglesRemaining--;
+                    }
             }
         }
     }
 
     lastButtonState = reading; // updates last button state for next loop
+}
+
+void wiggle(){
+    myDFPlayer.play(1);
+    playStartTime = millis(); //records time sounds start for timing LED
+    ledState = LED_FADING_IN; //starts fding the led in
+    fadeStartTime = millis();
+    myServo.write(180);
+    servoMoveTime = millis();
+    servoState = SERVO_RIGHT;
 }
