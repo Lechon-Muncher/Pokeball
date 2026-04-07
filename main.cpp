@@ -27,6 +27,10 @@ bool playingEscapeSound = false;
 unsigned long escapeSoundStart = 0;
 bool attemptMade = false;
 
+const unsigned long THROW_SOUND_DURATION = 5000;
+bool playingThrowSound = false;
+unsigned long throwSoundStart = 0;
+
 const int FADE_DURATION = 500;
 int ledBrightness = 0;
 
@@ -89,7 +93,7 @@ void loop() {
         Serial.println(F("Track finished"));
     }
 
-    if (wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF) {
+    if (wigglesRemaining > 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound && !playingEscapeSound && !playingThrowSound) {
         if (!waitingBetweenWiggles) {
             wiggleWaitStart = millis();
             waitingBetweenWiggles = true;
@@ -104,7 +108,7 @@ void loop() {
         playingCatchSound = false;
     }
 
-    if (caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound) {
+    if (caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingCatchSound && !playingEscapeSound && !playingThrowSound) {
         myDFPlayer.play(2);
         catchSoundStart = millis();
         playingCatchSound = true;
@@ -116,12 +120,17 @@ void loop() {
         playingEscapeSound = false;
     }
 
-    if (attemptMade && !caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingEscapeSound){
+    if (attemptMade && !caught && wigglesRemaining == 0 && servoState == SERVO_IDLE && ledState == LED_OFF && !playingEscapeSound && !playingThrowSound){
         myDFPlayer.play(3);
         escapeSoundStart = millis();
         playingEscapeSound = true;
         attemptMade = false;
     }
+
+    if (playingThrowSound && millis() - throwSoundStart >= THROW_SOUND_DURATION){
+        playingThrowSound = false;
+    }
+
 }
 
 void handleLED() {
@@ -150,6 +159,12 @@ void handleButton() {
     if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
         if (reading != buttonState) {
             buttonState = reading;
+
+            if (buttonState == LOW){
+                myDFPlayer.play(4); // play throw sound
+                throwSoundStart = millis();
+                playingThrowSound = true;
+            }
 
             if (buttonState == LOW && ledState == LED_OFF && servoState == SERVO_IDLE && wigglesRemaining == 0) {
                 attemptMade = true;
